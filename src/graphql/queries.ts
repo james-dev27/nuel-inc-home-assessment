@@ -1,4 +1,5 @@
-import { gql } from '@apollo/client';
+import * as Apollo from '@apollo/client';
+const { gql } = Apollo;
 
 export const GET_PRODUCTS = gql`
   query GetProducts($search: String, $status: String, $warehouse: String) {

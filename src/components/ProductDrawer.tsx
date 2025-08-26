@@ -1,5 +1,7 @@
+
 import React, { useState } from 'react';
-import { useMutation } from '@apollo/client';
+import * as Apollo from '@apollo/client';
+const { useMutation, useQuery } = Apollo;
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,7 +11,16 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Package, ArrowRightLeft, TrendingUp } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { UPDATE_DEMAND, TRANSFER_STOCK } from '@/graphql/queries';
+import { UPDATE_DEMAND, TRANSFER_STOCK, GET_WAREHOUSES } from '@/graphql/queries';
+
+interface Product {
+  id: string;
+  name: string;
+  sku: string;
+  warehouse: string;
+  stock: number;
+  demand: number;
+}
 
 interface Warehouse {
   code: string;
@@ -19,12 +30,12 @@ interface Warehouse {
 }
 
 interface ProductDrawerProps {
-  product: any | null;
+  product: Product | null;
   onClose: () => void;
-  warehouses: Warehouse[];
+  onProductUpdate?: () => void;
 }
 
-const getProductStatus = (product: any): 'Healthy' | 'Low' | 'Critical' => {
+const getProductStatus = (product: Product): 'Healthy' | 'Low' | 'Critical' => {
   if (product.stock > product.demand) return 'Healthy';
   if (product.stock === product.demand) return 'Low';
   return 'Critical';
@@ -39,14 +50,18 @@ const getStatusColor = (status: string) => {
   }
 };
 
-export const ProductDrawer: React.FC<ProductDrawerProps> = ({ product, onClose, warehouses }) => {
+export const ProductDrawer: React.FC<ProductDrawerProps> = ({ product, onClose, onProductUpdate }) => {
   const [newDemand, setNewDemand] = useState('');
   const [transferQuantity, setTransferQuantity] = useState('');
   const [targetWarehouse, setTargetWarehouse] = useState('');
   const { toast } = useToast();
 
-  const [updateDemand, { loading: updatingDemand }] = useMutation(UPDATE_DEMAND);
-  const [transferStock, { loading: transferringStock }] = useMutation(TRANSFER_STOCK);
+  // GraphQL queries and mutations
+  const { data: warehousesData } = useQuery(GET_WAREHOUSES);
+  const [updateDemandMutation, { loading: updateDemandLoading }] = useMutation(UPDATE_DEMAND);
+  const [transferStockMutation, { loading: transferStockLoading }] = useMutation(TRANSFER_STOCK);
+
+  const warehouses: Warehouse[] = warehousesData?.warehouses || [];
 
   React.useEffect(() => {
     if (product) {
@@ -74,18 +89,23 @@ export const ProductDrawer: React.FC<ProductDrawerProps> = ({ product, onClose, 
     }
 
     try {
-      await updateDemand({
-        variables: { productId: product.id, demand }
+      await updateDemandMutation({
+        variables: {
+          id: product.id,
+          demand: demand
+        }
       });
+
       toast({
         title: "Demand Updated",
         description: `Demand for ${product.name} updated to ${demand} units.`,
       });
-      onClose();
-    } catch (error: any) {
+      
+      onProductUpdate?.();
+    } catch (error) {
       toast({
-        title: "Error",
-        description: error.message || "Failed to update demand.",
+        title: "Update Failed",
+        description: "Failed to update demand. Please try again.",
         variant: "destructive"
       });
     }
@@ -112,25 +132,27 @@ export const ProductDrawer: React.FC<ProductDrawerProps> = ({ product, onClose, 
     }
 
     try {
-      await transferStock({
+      await transferStockMutation({
         variables: {
-          productId: product.id,
-          fromWarehouse: product.warehouse,
-          toWarehouse: targetWarehouse,
-          quantity
+          id: product.id,
+          from: product.warehouse,
+          to: targetWarehouse,
+          qty: quantity
         }
       });
+
       toast({
         title: "Stock Transferred",
         description: `${quantity} units transferred from ${product.warehouse} to ${targetWarehouse}.`,
       });
+
       setTransferQuantity('');
       setTargetWarehouse('');
-      onClose();
-    } catch (error: any) {
+      onProductUpdate?.();
+    } catch (error) {
       toast({
-        title: "Error",
-        description: error.message || "Failed to transfer stock.",
+        title: "Transfer Failed",
+        description: "Failed to transfer stock. Please try again.",
         variant: "destructive"
       });
     }
@@ -214,8 +236,12 @@ export const ProductDrawer: React.FC<ProductDrawerProps> = ({ product, onClose, 
                   className="mt-1"
                 />
               </div>
-              <Button onClick={handleUpdateDemand} className="w-full" loading={updatingDemand}>
-                Update Demand
+              <Button 
+                onClick={handleUpdateDemand} 
+                className="w-full"
+                disabled={updateDemandLoading}
+              >
+                {updateDemandLoading ? 'Updating...' : 'Update Demand'}
               </Button>
             </div>
           </div>
@@ -264,10 +290,9 @@ export const ProductDrawer: React.FC<ProductDrawerProps> = ({ product, onClose, 
                 onClick={handleTransferStock} 
                 variant="outline" 
                 className="w-full"
-                disabled={!transferQuantity || !targetWarehouse}
-                loading={transferringStock}
+                disabled={!transferQuantity || !targetWarehouse || transferStockLoading}
               >
-                Transfer Stock
+                {transferStockLoading ? 'Transferring...' : 'Transfer Stock'}
               </Button>
             </div>
           </div>

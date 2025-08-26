@@ -1,7 +1,0 @@
-{
-  "scripts": {
-    "dev:server": "cd server && npx tsx watch index.ts",
-    "dev:client": "vite",
-    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\""
-  }
-}

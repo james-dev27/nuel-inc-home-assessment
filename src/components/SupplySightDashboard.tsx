@@ -1,6 +1,7 @@
+
 import React, { useState, useMemo } from 'react';
-import { useQuery } from '@apollo/client';
-import { GET_PRODUCTS, GET_WAREHOUSES, GET_KPIS } from '@/graphql/queries';
+import * as Apollo from '@apollo/client';
+const { useQuery } = Apollo;
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,12 +9,35 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Package, Search, TrendingUp, AlertTriangle } from 'lucide-react';
+import { GET_PRODUCTS, GET_WAREHOUSES, GET_KPIS } from '@/graphql/queries';
 import { ProductDrawer } from './ProductDrawer';
 
 type DateRange = '7d' | '14d' | '30d';
 type ProductStatus = 'All' | 'Healthy' | 'Low' | 'Critical';
 
-const getProductStatus = (product: any): 'Healthy' | 'Low' | 'Critical' => {
+interface Product {
+  id: string;
+  name: string;
+  sku: string;
+  warehouse: string;
+  stock: number;
+  demand: number;
+}
+
+interface Warehouse {
+  code: string;
+  name: string;
+  city: string;
+  country: string;
+}
+
+interface KPI {
+  date: string;
+  stock: number;
+  demand: number;
+}
+
+const getProductStatus = (product: Product): 'Healthy' | 'Low' | 'Critical' => {
   if (product.stock > product.demand) return 'Healthy';
   if (product.stock === product.demand) return 'Low';
   return 'Critical';
@@ -31,40 +55,46 @@ const getStatusColor = (status: string) => {
 export const SupplySightDashboard: React.FC = () => {
   const [dateRange, setDateRange] = useState<DateRange>('7d');
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedWarehouse, setSelectedWarehouse] = useState<string>('All');
+  const [selectedWarehouse, setSelectedWarehouse] = useState<string>('all');
   const [selectedStatus, setSelectedStatus] = useState<ProductStatus>('All');
   const [currentPage, setCurrentPage] = useState(1);
-  const [selectedProduct, setSelectedProduct] = useState<any | null>(null);
-
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  
   const itemsPerPage = 10;
 
-  // Warehouses
-  const { data: warehousesData } = useQuery(GET_WAREHOUSES);
-  const warehouses = warehousesData?.warehouses || [];
-
-  // Products
-  const { data: productsData, refetch: refetchProducts } = useQuery(GET_PRODUCTS, {
+  // GraphQL queries
+  const { data: productsData, loading: productsLoading, refetch: refetchProducts } = useQuery(GET_PRODUCTS, {
     variables: {
       search: searchQuery || undefined,
-      status: selectedStatus !== 'All' ? selectedStatus : undefined,
-      warehouse: selectedWarehouse !== 'All' ? selectedWarehouse : undefined,
+      status: selectedStatus === 'All' ? undefined : selectedStatus.toLowerCase(),
+      warehouse: selectedWarehouse === 'all' ? undefined : selectedWarehouse,
     },
-    fetchPolicy: 'cache-and-network',
   });
-  const products = productsData?.products || [];
 
-  // KPI Data
-  const { data: kpiDataResp } = useQuery(GET_KPIS, {
+  const { data: warehousesData } = useQuery(GET_WAREHOUSES);
+  const { data: kpisData } = useQuery(GET_KPIS, {
     variables: { range: dateRange },
-    fetchPolicy: 'cache-and-network',
   });
-  const kpiData = kpiDataResp?.kpis || [];
+
+  const products: Product[] = productsData?.products || [];
+  const warehouses: Warehouse[] = warehousesData?.warehouses || [];
+  const kpiData: KPI[] = kpisData?.kpis || [];
+
+  // Filter products for status (client-side filtering since GraphQL handles other filters)
+  const filteredProducts = useMemo(() => {
+    if (selectedStatus === 'All') return products;
+    
+    return products.filter(product => {
+      const status = getProductStatus(product);
+      return status === selectedStatus;
+    });
+  }, [products, selectedStatus]);
 
   // Calculate KPIs
   const kpis = useMemo(() => {
-    const totalStock = products.reduce((sum: number, p: any) => sum + p.stock, 0);
-    const totalDemand = products.reduce((sum: number, p: any) => sum + p.demand, 0);
-    const totalFulfilled = products.reduce((sum: number, p: any) => sum + Math.min(p.stock, p.demand), 0);
+    const totalStock = products.reduce((sum, p) => sum + p.stock, 0);
+    const totalDemand = products.reduce((sum, p) => sum + p.demand, 0);
+    const totalFulfilled = products.reduce((sum, p) => sum + Math.min(p.stock, p.demand), 0);
     const fillRate = totalDemand > 0 ? (totalFulfilled / totalDemand) * 100 : 0;
 
     return {
@@ -75,11 +105,11 @@ export const SupplySightDashboard: React.FC = () => {
   }, [products]);
 
   // Pagination
-  const totalPages = Math.ceil(products.length / itemsPerPage);
+  const totalPages = Math.ceil(filteredProducts.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
-  const paginatedProducts = products.slice(startIndex, startIndex + itemsPerPage);
+  const paginatedProducts = filteredProducts.slice(startIndex, startIndex + itemsPerPage);
 
-  const handleProductClick = (product: any) => {
+  const handleProductClick = (product: Product) => {
     setSelectedProduct(product);
   };
 
@@ -194,7 +224,7 @@ export const SupplySightDashboard: React.FC = () => {
                   <SelectValue placeholder="Select warehouse" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="All">All Warehouses</SelectItem>
+                  <SelectItem value="all">All Warehouses</SelectItem>
                   {warehouses.map((warehouse) => (
                     <SelectItem key={warehouse.code} value={warehouse.code}>
                       {warehouse.name}
@@ -230,35 +260,43 @@ export const SupplySightDashboard: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {paginatedProducts.map((product) => {
-                      const status = getProductStatus(product);
-                      const isCritical = status === 'Critical';
-                      return (
-                        <tr
-                          key={product.id}
-                          className={`border-t border-border hover:bg-muted/20 cursor-pointer transition-colors ${
-                            isCritical ? 'bg-status-critical-row' : 'bg-background'
-                          }`}
-                          onClick={() => handleProductClick(product)}
-                        >
-                          <td className="p-4">
-                            <div>
-                              <div className="font-medium text-foreground">{product.name}</div>
-                              <div className="text-sm text-muted-foreground">{product.id}</div>
-                            </div>
-                          </td>
-                          <td className="p-4 text-foreground font-mono text-sm">{product.sku}</td>
-                          <td className="p-4 text-foreground">{product.warehouse}</td>
-                          <td className="p-4 text-foreground font-medium">{product.stock.toLocaleString()}</td>
-                          <td className="p-4 text-foreground font-medium">{product.demand.toLocaleString()}</td>
-                          <td className="p-4">
-                            <Badge className={`${getStatusColor(status)} border`}>
-                              {status}
-                            </Badge>
-                          </td>
-                        </tr>
-                      );
-                    })}
+                    {productsLoading ? (
+                      <tr>
+                        <td colSpan={6} className="p-8 text-center text-muted-foreground">
+                          Loading products...
+                        </td>
+                      </tr>
+                    ) : (
+                      paginatedProducts.map((product) => {
+                        const status = getProductStatus(product);
+                        const isCritical = status === 'Critical';
+                        return (
+                          <tr
+                            key={product.id}
+                            className={`border-t border-border hover:bg-muted/20 cursor-pointer transition-colors ${
+                              isCritical ? 'bg-status-critical-row' : 'bg-background'
+                            }`}
+                            onClick={() => handleProductClick(product)}
+                          >
+                            <td className="p-4">
+                              <div>
+                                <div className="font-medium text-foreground">{product.name}</div>
+                                <div className="text-sm text-muted-foreground">{product.id}</div>
+                              </div>
+                            </td>
+                            <td className="p-4 text-foreground font-mono text-sm">{product.sku}</td>
+                            <td className="p-4 text-foreground">{product.warehouse}</td>
+                            <td className="p-4 text-foreground font-medium">{product.stock.toLocaleString()}</td>
+                            <td className="p-4 text-foreground font-medium">{product.demand.toLocaleString()}</td>
+                            <td className="p-4">
+                              <Badge className={`${getStatusColor(status)} border`}>
+                                {status}
+                              </Badge>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -268,7 +306,7 @@ export const SupplySightDashboard: React.FC = () => {
             {totalPages > 1 && (
               <div className="flex items-center justify-between">
                 <div className="text-sm text-muted-foreground">
-                  Showing {startIndex + 1} to {Math.min(startIndex + itemsPerPage, products.length)} of {products.length} products
+                  Showing {startIndex + 1} to {Math.min(startIndex + itemsPerPage, filteredProducts.length)} of {filteredProducts.length} products
                 </div>
                 <div className="flex gap-2">
                   <Button
@@ -297,11 +335,11 @@ export const SupplySightDashboard: React.FC = () => {
       {/* Product Drawer */}
       <ProductDrawer
         product={selectedProduct}
-        onClose={() => {
-          setSelectedProduct(null);
+        onClose={() => setSelectedProduct(null)}
+        onProductUpdate={() => {
           refetchProducts();
+          setSelectedProduct(null);
         }}
-        warehouses={warehouses}
       />
     </div>
   );

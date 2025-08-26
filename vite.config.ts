@@ -10,11 +10,17 @@ export default defineConfig(({ mode }) => ({
   },
   plugins: [
     react(),
-    mode === 'development'
+    mode === 'development',
   ].filter(Boolean),
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
     },
+  },
+  optimizeDeps: {
+    include: ['@apollo/client'],
+  },
+  define: {
+    global: 'globalThis',
   },
 }));
