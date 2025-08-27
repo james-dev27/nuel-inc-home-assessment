@@ -11,14 +11,14 @@ A complete supply chain inventory management system with React frontend and Grap
 ## Getting Started
 
 ### Prerequisites
-- Node.js 18+
+- Node.js 22.9.0
 - npm or yarn
 
 ### Development Setup
 
 1. **Install dependencies**:
    ```bash
-   npm install
+   npm install --legacy-peer-deps
    ```
 
 2. **Start the development servers**:
